@@ -147,11 +147,14 @@ logs/
 *.npy
 *.npz
 
-# 忽略所有 .pth 模型文件，但保留 checkpoints/ 中的预训练模型
+# 忽略所有 .pth 模型文件，但保留 checkpoints/ 和 models/ 中的预训练模型
 *.pth
 !checkpoints/
 !checkpoints/**/
 !checkpoints/**/*.pth
+!models/
+!models/**/
+!models/**/*.pth
 
 # 注释掉上面这行，如果不想提交预训练模型到git：
 # checkpoints/

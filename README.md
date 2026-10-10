@@ -294,10 +294,7 @@ Output: 2×64×64 (振幅 + 相位)
 如果您使用了本项目的代码或模型，请引用：
 
 ```
-@article{ptycho-transunet,
-  title={Ptycho-TransUNet: Combining Ptychography with Transformer UNet for Phase Retrieval},
-  journal={...},
-  year={2024}
+@article{
 }
 ```
 
@@ -312,5 +309,4 @@ MIT License
 ## 联系方式
 
 如有问题，请联系：
-- Email: <your-email>
-- GitHub: <your-github>
+- Email: <zexu_liu@siom.ac.cn>

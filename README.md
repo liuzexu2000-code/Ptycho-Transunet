@@ -10,6 +10,8 @@
 - **多重叠率数据集**: 支持 overlap=0, 0.25, 0.5, 0.7 等多种配置
 - **完整流程**: 从数据生成、模型训练到可视化分析
 - **多种方法对比**: 包括 PtychoNN、TransUNet (单帧) 和 Ptycho-TransUNet (叠层)
+- **芯片缺陷检测**: 支持可见光和EUV波段的芯片叠层成像缺陷检测
+- **联合细化算法**: 结合传统PIE算法与无监督深度学习细化，实现带噪声条件下的高精度缺陷检测
 
 ## 文件夹结构
 
@@ -30,7 +32,13 @@ ptycho-transunet-github/
 │   ├── visualize_ptycho_data.py          # 可视化数据
 │   ├── visualize_single_data.py          # 可视化单帧数据
 │   ├── test_model_load.py                # 模型加载测试
-│   └── generate_reconstruction_comparison_decreasing_mse.py   # 生成对比图
+│   ├── generate_reconstruction_comparison_decreasing_mse.py   # 生成对比图
+│   ├── generate_chip_patterns.py         # 生成芯片检测样本（大尺寸+缺陷）
+│   ├── generate_ptycho_dataset_chip_padded.py        # 芯片叠层数据集生成（可见光，带padding）
+│   ├── generate_ptycho_dataset_chip_padded_EUV.py    # 芯片叠层数据集生成（EUV，带padding）
+│   ├── train_ptycho_chip_model_padded.py             # 训练芯片叠层模型（可见光）
+│   ├── train_EUVptycho_chip_model_padded.py          # 训练芯片叠层模型（EUV）
+│   └── combined_refinement_defect_30samples_noisy_fast_uns.py  # 联合细化与缺陷检测（带噪声）
 ├── checkpoints/                 # 预训练模型权重
 │   ├── models/                  # Overlap=0.7 的模型
 │   │   ├── best_transunet-ptycho_ptycho.pth    # Ptycho-TransUNet最佳模型
@@ -75,13 +83,24 @@ pip install -r requirements.txt
 
 ## 使用方法
 
-### 1. 生成数据集
+### 0. 生成芯片检测样本（可选）
+
+如果需要用于芯片检测的数据集，首先生成大尺寸(2048×2048)的芯片图案：
+
+```bash
+cd scripts
+python generate_chip_patterns.py
+```
+
+这将生成包含正常和有缺陷的芯片图案，详见 [README_CHIP_GENERATION.md](./README_CHIP_GENERATION.md)
+
+### 1. 生成叠层成像数据集
 
 ```bash
 cd scripts
 
 # 编辑 generate_ptycho_dataset.py 中的参数
-# - image_path: 原始图案路径
+# - image_path: 原始图案路径（可以使用生成的芯片图案）
 # - output_dir: 输出文件夹
 # - num_samples: 样本数量
 # - overlap: 重叠率 (0, 0.25, 0.5, 0.7)
@@ -138,6 +157,81 @@ model.eval()
 with torch.no_grad():
     pred_amp, pred_phase = model(input_data)
 ```
+
+### 6. 芯片缺陷检测应用
+
+本项目支持在可见光和EUV（极紫外）波段下进行芯片缺陷检测，包含数据集生成、模型训练和联合细化缺陷检测的完整流程。
+
+#### 6.1 芯片叠层成像数据集生成
+
+**可见光波段（632.8 nm）:**
+
+```bash
+cd scripts
+
+# 编辑 generate_ptycho_dataset_chip_padded.py 中的参数：
+# - image_path: 带缺陷芯片图案路径
+# - original_image_path: 无缺陷芯片图案路径（用于生成标签）
+# - output_dir: 输出目录
+# - num_samples: 样本数量
+# - overlap: 重叠率（默认0.7）
+
+python generate_ptycho_dataset_chip_padded.py
+```
+
+该脚本生成带padding的叠层成像数据集，标签包含4个通道：带缺陷振幅、带缺陷相位、无缺陷振幅、无缺陷相位。
+
+**EUV波段（13.5 nm）:**
+
+```bash
+python generate_ptycho_dataset_chip_padded_EUV.py
+```
+
+EUV版本使用与可见光相同的数据结构，但物理参数针对EUV光刻场景进行了调整：
+- 波长: 13.5 nm
+- 探测器像素尺寸: 176 μm
+- 探针大小: 0.162 μm
+- 传播距离: 5.7 mm
+
+#### 6.2 训练芯片缺陷检测模型
+
+**可见光波段:**
+
+```bash
+python train_ptycho_chip_model_padded.py
+```
+
+**EUV波段:**
+
+```bash
+python train_EUVptycho_chip_model_padded.py
+```
+
+训练脚本的特点：
+- 使用 **前向传播损失（Forward Loss）** 作为物理约束，将预测的振幅/相位通过正向衍射传播与原始衍射图对比
+- 损失函数 = 监督损失（MSE） + λ × 前向传播损失
+- 支持 padding 到能被8整除的尺寸，适配 TransUNet 的下采样需求
+- 自动保存最佳模型权重和训练损失曲线
+
+#### 6.3 联合细化与缺陷检测
+
+```bash
+python combined_refinement_defect_30samples_noisy_fast_uns.py
+```
+
+该脚本实现了多种重构算法的对比与缺陷检测，流程如下：
+
+1. **加载预训练 TransUNet** 得到初始重构
+2. **添加噪声**（泊松噪声 + 高斯噪声）模拟真实测量条件
+3. **传统 PIE 算法细化**（ePIE、rPIE、mPIE），分别基于初始预测和随机初始化
+4. **无监督深度学习细化**（向量化前向传播，快速版本）
+5. **缺陷检测**：将重构结果与无缺陷参考图像对比，自动检测并标记缺陷区域
+
+输出包括：
+- 各方法重构结果对比图（振幅、相位）
+- 缺陷检测结果图（红色轮廓标记缺陷位置）
+- MSE统计箱线图和逐样本MSE曲线
+- PIE迭代误差曲线和无监督损失曲线
 
 ## 网络架构
 
